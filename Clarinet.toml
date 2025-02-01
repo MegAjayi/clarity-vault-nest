@@ -8,6 +8,10 @@ requirements = []
 path = "contracts/vault-nest.clar"
 depends_on = []
 
+[contracts.vault-nest-recovery]
+path = "contracts/vault-nest-recovery.clar"
+depends_on = []
+
 [repl]
 costs_version = 2
 parser_version = 2
