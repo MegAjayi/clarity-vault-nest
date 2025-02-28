@@ -26,7 +26,7 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Ensure deposit works correctly",
+  name: "Ensure deposit works correctly with reentrancy protection",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const wallet_1 = accounts.get("wallet_1")!;
     
@@ -42,6 +42,27 @@ Clarinet.test({
     ]);
     
     assertEquals(block.receipts.length, 2);
+    block.receipts[1].result.expectOk().expectBool(true);
+  },
+});
+
+Clarinet.test({
+  name: "Test recovery initiation",
+  async fn(chain: Chain, accounts: Map<string, Account>) {
+    const wallet_1 = accounts.get("wallet_1")!;
+    const wallet_2 = accounts.get("wallet_2")!;
+    
+    let block = chain.mineBlock([
+      Tx.contractCall("vault-nest", "create-vault", 
+        [types.some(wallet_2.address), types.bool(false)], 
+        wallet_1.address
+      ),
+      Tx.contractCall("vault-nest-recovery", "initiate-recovery", 
+        [types.principal(wallet_1.address)], 
+        wallet_2.address
+      )
+    ]);
+    
     block.receipts[1].result.expectOk().expectBool(true);
   },
 });
