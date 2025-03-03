@@ -5,6 +5,7 @@
 (define-constant err-not-authorized (err u200))
 (define-constant err-invalid-state (err u201))
 (define-constant err-cooldown-active (err u202))
+(define-constant recovery-timelock uint u144) ;; 24 hours in blocks
 
 ;; Recovery request tracking
 (define-map recovery-requests
@@ -12,7 +13,8 @@
   {
     initiator: principal,
     requested-at: uint,
-    status: (string-ascii 20)
+    status: (string-ascii 20),
+    execution-height: uint
   }
 )
 
@@ -35,7 +37,8 @@
       {
         initiator: tx-sender,
         requested-at: block-height,
-        status: "pending"
+        status: "pending",
+        execution-height: (+ block-height recovery-timelock)
       }
     )
     (ok true)
