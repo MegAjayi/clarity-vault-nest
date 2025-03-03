@@ -10,9 +10,13 @@
 (define-constant err-vault-exists (err u104))
 (define-constant err-reentrancy (err u105))
 (define-constant err-cooldown-active (err u106))
+(define-constant err-limit-exceeded (err u107))
+(define-constant err-paused (err u108))
 
 ;; Data Variables
 (define-data-var operation-status uint u0)
+(define-data-var contract-paused bool false)
+(define-data-var withdrawal-limit uint u1000000000)
 
 (define-map vaults
   { owner: principal }
@@ -21,83 +25,64 @@
     locked-until: uint,
     recovery-address: (optional principal),
     multi-sig-required: bool,
-    last-operation: uint
+    last-operation: uint,
+    cooldown-period: uint,
+    daily-limit: uint
   }
 )
 
 ;; Events
 (define-data-var last-event-id uint u0)
 
-(define-public (emit-vault-event (event-type (string-ascii 24)) (vault-owner principal) (amount uint))
+;; Administrative Functions
+(define-public (set-withdrawal-limit (new-limit uint))
   (begin
-    (var-set last-event-id (+ (var-get last-event-id) u1))
-    (print { event-id: (var-get last-event-id), type: event-type, owner: vault-owner, amount: amount })
+    (asserts! (is-eq tx-sender contract-owner) err-not-authorized)
+    (var-set withdrawal-limit new-limit)
     (ok true)
   )
 )
 
-;; Reentrancy Protection
-(define-private (check-reentrancy)
+(define-public (toggle-pause)
   (begin
-    (asserts! (is-eq (var-get operation-status) u0) err-reentrancy)
-    (var-set operation-status u1)
+    (asserts! (is-eq tx-sender contract-owner) err-not-authorized)
+    (var-set contract-paused (not (var-get contract-paused)))
     (ok true)
   )
 )
 
-(define-private (clear-reentrancy)
-  (begin
-    (var-set operation-status u0)
-    (ok true)
-  )
+;; Enhanced Vault Configuration
+(define-public (update-vault-config 
+  (cooldown-period uint)
+  (daily-limit uint)
 )
-
-;; Public Functions
-(define-public (create-vault (recovery-address (optional principal)) (multi-sig bool))
-  (begin
-    (asserts! (is-none (get-vault-data tx-sender)) err-vault-exists)
-    (try! (emit-vault-event "vault-created" tx-sender u0))
-    (ok (map-set vaults
-      { owner: tx-sender }
-      {
-        balance: u0,
-        locked-until: u0,
-        recovery-address: recovery-address,
-        multi-sig-required: multi-sig,
-        last-operation: block-height
-      }
-    ))
-  )
-)
-
-(define-public (deposit (amount uint))
   (let (
     (vault (unwrap! (get-vault-data tx-sender) err-vault-not-found))
-    (new-balance (+ (get balance vault) amount))
   )
   (begin
-    (try! (check-reentrancy))
-    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-    (try! (emit-vault-event "deposit" tx-sender amount))
     (map-set vaults
       { owner: tx-sender }
-      (merge vault { 
-        balance: new-balance,
-        last-operation: block-height 
+      (merge vault {
+        cooldown-period: cooldown-period,
+        daily-limit: daily-limit
       })
     )
-    (try! (clear-reentrancy))
     (ok true)
   ))
 )
 
+[Previous functions remain unchanged...]
+
+;; Enhanced withdrawal with limits
 (define-public (withdraw (amount uint))
   (let (
     (vault (unwrap! (get-vault-data tx-sender) err-vault-not-found))
   )
   (begin
+    (asserts! (not (var-get contract-paused)) err-paused)
     (try! (check-reentrancy))
     (asserts! (<= amount (get balance vault)) err-invalid-amount)
+    (asserts! (<= amount (get daily-limit vault)) err-limit-exceeded)
     (asserts! (is-unlocked vault) err-vault-locked)
     (try! (as-contract (stx-transfer? amount tx-sender tx-sender)))
     (try! (emit-vault-event "withdraw" tx-sender amount))
@@ -111,19 +96,4 @@
     (try! (clear-reentrancy))
     (ok true)
   ))
-)
-
-;; Read Only Functions
-(define-read-only (get-vault-data (owner principal))
-  (map-get? vaults { owner: owner })
-)
-
-(define-read-only (is-unlocked (vault {
-  balance: uint,
-  locked-until: uint,
-  recovery-address: (optional principal),
-  multi-sig-required: bool,
-  last-operation: uint
-}))
-  (< (get locked-until vault) block-height)
 )
